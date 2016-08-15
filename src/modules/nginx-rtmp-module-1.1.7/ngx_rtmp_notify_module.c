@@ -463,7 +463,12 @@ ngx_rtmp_notify_disconnect_create(ngx_rtmp_session_t *s, void *arg,
     ngx_url_t                      *url;
     ngx_chain_t                    *al, *bl, *pl;
     ngx_buf_t                      *b;
+    size_t                          name_len;
+    ngx_rtmp_notify_ctx_t          *ctx;
 
+    ctx = ngx_rtmp_get_module_ctx(s, ngx_rtmp_notify_module);
+    name_len = ctx ? ngx_strlen(ctx->name) : 0;
+    
     nscf = ngx_rtmp_get_module_srv_conf(s, ngx_rtmp_notify_module);
 
     pl = ngx_alloc_chain_link(pool);
@@ -474,6 +479,7 @@ ngx_rtmp_notify_disconnect_create(ngx_rtmp_session_t *s, void *arg,
     b = ngx_create_temp_buf(pool,
                             sizeof("&call=disconnect") +
                             sizeof("&app=") + s->app.len * 3 +
+                            sizeof("&name=") + name_len * 3 +
                             1 + s->args.len);
     if (b == NULL) {
         return NULL;
@@ -488,6 +494,11 @@ ngx_rtmp_notify_disconnect_create(ngx_rtmp_session_t *s, void *arg,
     b->last = ngx_cpymem(b->last, (u_char*) "&app=", sizeof("&app=") - 1);
     b->last = (u_char*) ngx_escape_uri(b->last, s->app.data, s->app.len,
                                        NGX_ESCAPE_ARGS);
+    if (name_len) {
+        b->last = ngx_cpymem(b->last, (u_char*) "&name=", sizeof("&name=") - 1);
+        b->last = (u_char*) ngx_escape_uri(b->last, ctx->name, name_len,
+                                           NGX_ESCAPE_ARGS);
+    }
 
     if (s->args.len) {
         *b->last++ = '&';
