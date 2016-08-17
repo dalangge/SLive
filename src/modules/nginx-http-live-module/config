@@ -1,0 +1,15 @@
+ngx_addon_name="ngx_http_live_module"
+
+HTTP_MODULES="$HTTP_MODULES                                 \
+                ngx_http_live_module                        \
+                "
+
+NGX_ADDON_DEPS="$NGX_ADDON_DEPS                             \
+                $ngx_addon_dir/ngx_http_live_module.h       \
+                "
+
+NGX_ADDON_SRCS="$NGX_ADDON_SRCS                             \
+                $ngx_addon_dir/ngx_http_live_module.c       \
+                "
+CFLAGS="$CFLAGS -I$ngx_addon_dir"
+
