@@ -98,6 +98,15 @@ ngx_rtmp_hflv_publish(ngx_rtmp_session_t *s, ngx_rtmp_publish_t *v)
 {
     ngx_log_error(NGX_LOG_ERR, s->connection->log, 0, "hflv : publish %s",
                   v->name);
+ 
+    ngx_rtmp_hflv_app_conf_t * hacf;
+    
+    hacf = ngx_rtmp_get_module_app_conf(s, ngx_rtmp_hflv_module);
+    
+    if (!hacf->hflv) {
+        ngx_log_error(NGX_LOG_ERR, s->connection->log, 0, "hflv : publish %s no flv subscribe",
+                      v->name);
+    }
     
     return next_publish(s, v);
 }
