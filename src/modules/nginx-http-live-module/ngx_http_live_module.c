@@ -8,24 +8,6 @@
 #include <ngx_http.h>
 #include "ngx_http_live_module.h"
 
-struct ngx_http_live_ctx_s {
-    ngx_buf_t              *buf;
-};
-
-struct ngx_http_live_srv_conf_s {
-    ngx_pool_t             *pool;
-    size_t                  out_cork;
-};
-
-struct ngx_http_live_loc_conf_s {
-    ngx_flag_t              live;
-};
-
-typedef struct ngx_http_live_srv_conf_s ngx_http_live_srv_conf_t;
-typedef struct ngx_http_live_loc_conf_s ngx_http_live_loc_conf_t;
-
-typedef struct ngx_http_live_ctx_s ngx_http_live_ctx_t;
-
 
 static void * ngx_http_live_create_srv_conf(ngx_conf_t *cf);
 static char * ngx_http_live_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child);
@@ -137,6 +119,7 @@ ngx_http_live_create_loc_conf(ngx_conf_t* cf)
     }
     
     conf->live = NGX_CONF_UNSET;
+    conf->nbuckets = NGX_CONF_UNSET;
     
     return conf;
 }
@@ -148,8 +131,198 @@ ngx_http_live_merge_loc_conf(ngx_conf_t* cf, void* parent, void* child)
     ngx_http_live_loc_conf_t    *conf = child;
     
     ngx_conf_merge_value(conf->live, prev->live, 0);
+    ngx_conf_merge_value(conf->nbuckets, prev->nbuckets, 1024);
     
+    conf->pool = ngx_create_pool(4096, &cf->cycle->new_log);
+    if (conf->pool == NULL) {
+        return NGX_CONF_ERROR;
+    }
+    
+    conf->streams = ngx_pcalloc(cf->pool,
+                                sizeof(ngx_http_live_stream_t *) * conf->nbuckets);
     return NGX_CONF_OK;
+}
+
+static ngx_http_live_stream_t **
+ngx_http_live_get_stream(ngx_http_request_t *r, u_char *name, int create)
+{
+    ngx_http_live_loc_conf_t       *llcf;
+    ngx_http_live_stream_t        **stream;
+    size_t                          len;
+    
+    llcf = ngx_http_get_module_loc_conf(r, ngx_http_live_module);
+    if (llcf == NULL) {
+        return NULL;
+    }
+    
+    len = ngx_strlen(name);
+    stream = &llcf->streams[ngx_hash_key(name, len) % llcf->nbuckets];
+    
+    for (; *stream; stream = &(*stream)->next) {
+        if (ngx_strcmp(name, (*stream)->name) == 0) {
+            return stream;
+        }
+    }
+    
+    if (!create) {
+        return NULL;
+    }
+    
+    // create new stream
+    if (llcf->free_streams) {
+        *stream = llcf->free_streams;
+        llcf->free_streams = llcf->free_streams->next;
+    } else {
+        *stream = ngx_palloc(llcf->pool, sizeof(ngx_http_live_stream_t));
+    }
+    ngx_memzero(*stream, sizeof(ngx_http_live_stream_t));
+    ngx_memcpy((*stream)->name, name,
+               ngx_min(sizeof((*stream)->name) - 1, len));
+    (*stream)->epoch = ngx_current_msec;
+    
+    return stream;
+}
+
+
+
+static ngx_int_t
+ngx_http_live_join(ngx_http_request_t *r, u_char *name, unsigned publisher)
+{
+    ngx_http_live_ctx_t            *ctx;
+    ngx_http_live_stream_t        **stream;
+    ngx_http_live_loc_conf_t       *llcf;
+    
+    llcf = ngx_http_get_module_loc_conf(r, ngx_http_live_module);
+    if (llcf == NULL) {
+        return NGX_ERROR;
+    }
+    
+    ctx = ngx_http_get_module_ctx(r, ngx_http_live_module);
+    if (ctx && ctx->stream) {
+        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+                      "http_live: %s already joined", name);
+        return NGX_ERROR;
+    }
+    
+    if (ctx == NULL) {
+        ctx = ngx_palloc(r->connection->pool, sizeof(ngx_http_live_ctx_t));
+        ngx_http_set_ctx(r, ctx, ngx_http_live_module);
+    }
+    
+    ngx_memzero(ctx, sizeof(*ctx));
+    
+    ctx->r = r;
+    
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "http_live: join %s", name);
+    
+    stream = ngx_http_live_get_stream(r, name, publisher);
+    
+    if (stream == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "http_live: stream not found");
+        return NGX_ERROR;
+    }
+    
+/*    if (publisher) {
+        if ((*stream)->publishing) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "http_live: already publishing");
+            return NGX_ERROR;
+        }
+        
+        (*stream)->publishing = 1;
+    }
+  */
+    ctx->stream = *stream;
+    ctx->publishing = publisher;
+    ctx->next = (*stream)->ctx;
+    
+    (*stream)->ctx = ctx;
+    
+    if(1){
+        ctx->buf = ngx_create_temp_buf(r->connection->pool, 10*1024*1024);
+        FILE * fp = fopen("/root/workspace/stream/qianqian_h264_aac.flv",
+                          "rb+");
+        while (!feof(fp)) {
+            ctx->buf->last += fread(ctx->buf->last, 1, 1024, fp);
+        }
+        fclose(fp);
+    }
+    
+    return NGX_OK;
+}
+
+static void
+ngx_http_live_close_stream(ngx_http_request_t *r)
+{
+    ngx_http_live_ctx_t            *ctx, **cctx;//, *pctx;
+    ngx_http_live_stream_t        **stream;
+    ngx_http_live_loc_conf_t        *llcf;
+    
+    llcf = ngx_http_get_module_ctx(r, ngx_http_live_module);
+    if (llcf == NULL) {
+        return;
+    }
+    
+    ctx = ngx_http_get_module_ctx(r, ngx_http_live_module);
+    if (ctx == NULL) {
+        return;
+    }
+    
+    if (ctx->stream == NULL) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                       "http_live: not joined");
+        return;
+    }
+    
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "http_live: leave '%s'", ctx->stream->name);
+    
+    if (ctx->stream->publishing && ctx->publishing) {
+        ctx->stream->publishing = 0;
+    }
+    
+    for (cctx = &ctx->stream->ctx; *cctx; cctx = &(*cctx)->next) {
+        if (*cctx == ctx) {
+            *cctx = ctx->next;
+            break;
+        }
+    }
+    
+    if (ctx->publishing) {
+        /*if (!lacf->idle_streams) {
+            for (pctx = ctx->stream->ctx; pctx; pctx = pctx->next) {
+                if (pctx->publishing == 0) {
+                    ss = pctx->session;
+                    ngx_log_debug0(NGX_LOG_DEBUG_RTMP, ss->connection->log, 0,
+                                   "live: no publisher");
+                    ngx_rtmp_finalize_session(ss);
+                }
+            }
+        }*/
+    }
+    
+    if (ctx->stream->ctx) {
+        ctx->stream = NULL;
+        return;
+    }
+    
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "http_live: delete empty stream '%s'",
+                   ctx->stream->name);
+    
+    stream = ngx_http_live_get_stream(r, ctx->stream->name, 0);
+    if (stream == NULL) {
+        return;
+    }
+    *stream = (*stream)->next;
+    
+    ctx->stream->next = llcf->free_streams;
+    llcf->free_streams = ctx->stream;
+    ctx->stream = NULL;
+    
+    return;
 }
 
 static void
@@ -157,7 +330,9 @@ ngx_http_live_close(ngx_http_request_t *r, ngx_int_t rc)
 {
     // close stream here
     
-    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "hflv: close stream");
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "http_live: close stream");
+    
+    ngx_http_live_close_stream(r);
     
     ngx_http_finalize_request(r, rc);
 }
@@ -235,60 +410,68 @@ ngx_http_live_recv(ngx_event_t *rev)
 static ngx_int_t
 ngx_http_live_handler(ngx_http_request_t *r)
 {
-    ngx_int_t   rc;
-    ngx_http_live_loc_conf_t   *hlcf;
+    ngx_int_t                   rc;
     ngx_http_core_loc_conf_t   *clcf;
-    ngx_http_live_ctx_t        *ctx;
-    size_t  ret;
-    
-    
-    hlcf =ngx_http_get_module_loc_conf(r, ngx_http_live_module);
+    ngx_http_live_loc_conf_t   *llcf;
+    u_char                      name[NGX_HTTP_MAX_NAME];
+
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
+    if (clcf == NULL) {
+        return NGX_ERROR;
+    }
+    
+    llcf =ngx_http_get_module_loc_conf(r, ngx_http_live_module);
+    if (llcf == NULL) {
+        return NGX_ERROR;
+    }
+
+    // don't use chunked and postpone
+    if (clcf->chunked_transfer_encoding || clcf->postpone_output) {
+        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+                      "http_live: chunked_transfer_encoding=%d, postpone_output=%d",
+                      clcf->chunked_transfer_encoding, clcf->postpone_output);
+        return NGX_ERROR;
+    }
+    
+    if (!llcf->live) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                       "http_live: live off");
+        return NGX_HTTP_NOT_ALLOWED;
+    }
     
     rc = ngx_http_discard_request_body(r);
     if (rc != NGX_OK) {
         return rc;
     }
+    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+                  "http_live: xxx %V %V %V", &r->exten, &r->uri,
+                  &r->args);
     
-    ctx = ngx_palloc(r->connection->pool, sizeof(ngx_http_live_ctx_t));
-    ngx_http_set_ctx(r, ctx, ngx_http_live_module);
+    ngx_memzero(name, sizeof(name));
+    ngx_memcpy(name, r->uri.data, ngx_min(r->uri.len, sizeof(name)-1));
     
-    if(1){
-        ctx->buf = ngx_create_temp_buf(r->connection->pool, 10*1024*1024);
-        FILE * fp = fopen("/root/workspace/stream/qianqian_h264_aac.flv",
-                          "rb+");
-        while (!feof(fp)) {
-            ret = fread(ctx->buf->last, 1, 1024, fp);
-            ctx->buf->last += ret;
-        }
-        fclose(fp);
-    }
-    
-    /*
-     chunked_transfer_encoding off;
-     postpone_output 0;
-     make sure all headers sent before ngx_http_send_header return
-     */
-    if (!hlcf->live || clcf->chunked_transfer_encoding || clcf->postpone_output) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "http_live: loc config error, "
-                      "live:%d chunked_transfer_encoding:%d postpone_output:%d",
-                      hlcf->live, clcf->chunked_transfer_encoding, clcf->postpone_output);
-        return NGX_HTTP_FORBIDDEN;
+    rc = ngx_http_live_join(r, name, 1);
+    if (rc != NGX_OK) {
+        return NGX_ERROR;
     }
     
     r->headers_out.status = NGX_HTTP_OK;
-   // r->headers_out.content_length_n = 0;
+    // r->headers_out.content_length_n = 0;
     rc = ngx_http_send_header(r);
     if (rc == NGX_ERROR || rc > NGX_OK || r->header_only) {
         return rc;
     }
     
-    /* notice: rewrite handler, body will skip the body filter process */
+    // header has been sent
+    // rewrite the handler, body will not use nginx body filter chain but our own send
     r->connection->write->handler = ngx_http_live_send;
     r->connection->read->handler = ngx_http_live_recv;
     r->main->count++;
     
-    ngx_http_live_send(r->connection->write);
+    if (!r->connection->write->active) {
+        ngx_http_live_send(r->connection->write);
+    }
+    
     return NGX_DONE;
  }
 
