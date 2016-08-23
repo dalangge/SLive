@@ -10,6 +10,8 @@ NGX_ADDON_DEPS="$NGX_ADDON_DEPS                             \
 
 NGX_ADDON_SRCS="$NGX_ADDON_SRCS                             \
                 $ngx_addon_dir/ngx_http_live_module.c       \
+                $ngx_addon_dir/ngx_http_live_shared.c       \
+                $ngx_addon_dir/ngx_http_live_handler.c      \
                 "
 CFLAGS="$CFLAGS -I$ngx_addon_dir"
 

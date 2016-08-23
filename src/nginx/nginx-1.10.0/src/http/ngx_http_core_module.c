@@ -21,7 +21,7 @@ typedef struct {
 #define NGX_HTTP_REQUEST_BODY_FILE_CLEAN  2
 
 
-static ngx_int_t ngx_http_core_find_location(ngx_http_request_t *r);
+//static ngx_int_t ngx_http_core_find_location(ngx_http_request_t *r);
 static ngx_int_t ngx_http_core_find_static_location(ngx_http_request_t *r,
     ngx_http_location_tree_node_t *node);
 
@@ -1500,7 +1500,7 @@ ngx_http_update_location_config(ngx_http_request_t *r)
  * NGX_DECLINED - no match
  */
 
-static ngx_int_t
+/*static*/ ngx_int_t
 ngx_http_core_find_location(ngx_http_request_t *r)
 {
     ngx_int_t                  rc;
@@ -1599,6 +1599,10 @@ ngx_http_core_find_static_location(ngx_http_request_t *r,
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                        "test location: \"%*s\"",
                        (size_t) node->len, node->name);
+        
+        ngx_log_debug4(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                       "test location: %s %d \"%*s\"",
+                        uri, len, (size_t) node->len, node->name);
 
         n = (len <= (size_t) node->len) ? len : node->len;
 

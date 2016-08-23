@@ -74,9 +74,9 @@ ngx_http_live_create_srv_conf(ngx_conf_t *cf)
         return NGX_CONF_ERROR;
     }
     
-    /*conf->chunk_size = NGX_CONF_UNSET;
+    conf->chunk_size = NGX_CONF_UNSET;
     conf->out_cork = NGX_CONF_UNSET_SIZE;
-    conf->out_queue = NGX_CONF_UNSET_SIZE;*/
+    conf->out_queue = NGX_CONF_UNSET_SIZE;
     
     //lscf->nbuckets = NGX_CONF_UNSET;
     
@@ -89,21 +89,19 @@ ngx_http_live_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_live_srv_conf_t *prev = parent;
     ngx_http_live_srv_conf_t *conf = child;
     
-    //ngx_conf_merge_value(conf->chunk_size, prev->chunk_size, 4096);
-    //ngx_conf_merge_size_value(conf->out_queue, prev->out_queue, 256);
-    //ngx_conf_merge_size_value(conf->out_cork, prev->out_cork, conf->out_queue / 8);
-    
-    ngx_conf_merge_size_value(conf->out_cork, prev->out_cork, 256 / 8);
+    ngx_conf_merge_value(conf->chunk_size, prev->chunk_size, 4096);
+    ngx_conf_merge_size_value(conf->out_queue, prev->out_queue, 256);
+    ngx_conf_merge_size_value(conf->out_cork, prev->out_cork, conf->out_queue / 8);
 
     
-    /*if (prev->pool == NULL) {
+    if (prev->pool == NULL) {
         prev->pool = ngx_create_pool(4096, &cf->cycle->new_log);
         if (prev->pool == NULL) {
             return NGX_CONF_ERROR;
         }
     }
     
-    conf->pool = prev->pool;*/
+    conf->pool = prev->pool;
     
     return NGX_CONF_OK;
 }
@@ -120,6 +118,7 @@ ngx_http_live_create_loc_conf(ngx_conf_t* cf)
     
     conf->live = NGX_CONF_UNSET;
     conf->nbuckets = NGX_CONF_UNSET;
+    conf->idle_streams = NGX_CONF_UNSET;
     
     return conf;
 }
@@ -132,6 +131,7 @@ ngx_http_live_merge_loc_conf(ngx_conf_t* cf, void* parent, void* child)
     
     ngx_conf_merge_value(conf->live, prev->live, 0);
     ngx_conf_merge_value(conf->nbuckets, prev->nbuckets, 1024);
+    ngx_conf_merge_value(conf->idle_streams, prev->idle_streams, 1);
     
     conf->pool = ngx_create_pool(4096, &cf->cycle->new_log);
     if (conf->pool == NULL) {
@@ -185,35 +185,49 @@ ngx_http_live_get_stream(ngx_http_request_t *r, u_char *name, int create)
 
 
 
-static ngx_int_t
+/*static*/ ngx_int_t
 ngx_http_live_join(ngx_http_request_t *r, u_char *name, unsigned publisher)
 {
     ngx_http_live_ctx_t            *ctx;
     ngx_http_live_stream_t        **stream;
+    ngx_http_live_srv_conf_t       *lscf;
     ngx_http_live_loc_conf_t       *llcf;
     
+    lscf = ngx_http_get_module_srv_conf(r, ngx_http_live_module);
+    if (lscf == NULL) {
+        return NGX_ERROR;
+    }
+    
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_live_module);
-    if (llcf == NULL) {
+    if (llcf == NULL || !llcf->live) {
         return NGX_ERROR;
     }
     
     ctx = ngx_http_get_module_ctx(r, ngx_http_live_module);
     if (ctx && ctx->stream) {
         ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
-                      "http_live: %s already joined", name);
+                      "http_live: already joined, %s", name);
         return NGX_ERROR;
     }
     
     if (ctx == NULL) {
-        ctx = ngx_palloc(r->connection->pool, sizeof(ngx_http_live_ctx_t));
+        ctx = ngx_palloc(r->connection->pool, sizeof(ngx_http_live_ctx_t) +
+                         sizeof(ngx_chain_t *) * lscf->out_queue);
         ngx_http_set_ctx(r, ctx, ngx_http_live_module);
     }
     
     ngx_memzero(ctx, sizeof(*ctx));
     
     ctx->r = r;
+    ctx->out_queue = lscf->out_queue;
+    ctx->out_cork = lscf->out_cork;
+    ctx->out_buffer = 1;
+    ctx->timeout = 30000;
+    
     
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "http_live: join %s", name);
+    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
                    "http_live: join %s", name);
     
     stream = ngx_http_live_get_stream(r, name, publisher);
@@ -224,7 +238,7 @@ ngx_http_live_join(ngx_http_request_t *r, u_char *name, unsigned publisher)
         return NGX_ERROR;
     }
     
-/*    if (publisher) {
+    if (publisher) {
         if ((*stream)->publishing) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                           "http_live: already publishing");
@@ -233,27 +247,117 @@ ngx_http_live_join(ngx_http_request_t *r, u_char *name, unsigned publisher)
         
         (*stream)->publishing = 1;
     }
-  */
+  
     ctx->stream = *stream;
     ctx->publishing = publisher;
     ctx->next = (*stream)->ctx;
     
     (*stream)->ctx = ctx;
     
-    if(1){
-        ctx->buf = ngx_create_temp_buf(r->connection->pool, 10*1024*1024);
-        FILE * fp = fopen("/root/workspace/stream/qianqian_h264_aac.flv",
-                          "rb+");
-        while (!feof(fp)) {
-            ctx->buf->last += fread(ctx->buf->last, 1, 1024, fp);
+    return NGX_OK;
+}
+
+ngx_int_t
+ngx_http_live_av(ngx_http_request_t *r, ngx_chain_t *in, ngx_int_t type, ngx_int_t key_frame)
+{
+    ngx_http_live_ctx_t             *ctx, *pctx;
+    ngx_http_live_srv_conf_t        *lscf;
+    ngx_http_live_loc_conf_t        *llcf;
+    ngx_chain_t                     *rpkt;
+    
+    lscf = ngx_http_get_module_srv_conf(r, ngx_http_live_module);
+    if (lscf == NULL) {
+        return NGX_ERROR;
+    }
+    
+    llcf = ngx_http_get_module_loc_conf(r, ngx_http_live_module);
+    if (lscf == NULL) {
+        return NGX_ERROR;
+    }
+    
+    if (!llcf->live || in == NULL || in->buf == NULL) {
+        return NGX_OK;
+    }
+    
+    ctx = ngx_http_get_module_ctx(r, ngx_http_live_module);
+    if (ctx == NULL || ctx->stream == NULL) {
+        return NGX_OK;
+    }
+    
+    if (ctx->publishing == 0) {
+        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+                       "http_live: from non-publisher");
+        return NGX_OK;
+    }
+    
+    rpkt = ngx_http_live_append_shared_bufs(lscf, NULL, in);
+    
+    if (type == LIVE_FLV_HEADER) {
+        if (ctx->flv_header) {
+            ngx_http_live_free_shared_chain(lscf, ctx->flv_header);
         }
-        fclose(fp);
+        ngx_http_acquire_shared_chain(rpkt);
+        ctx->flv_header = rpkt;
+    }
+    else if (type == LIVE_AAC_HEADER) {
+        ngx_http_acquire_shared_chain(rpkt);
+        ctx->aac_header = rpkt;
+    }
+    else if (type == LIVE_AVC_HEADER) {
+        ngx_http_acquire_shared_chain(rpkt);
+        ctx->avc_header = rpkt;
+    }
+    
+    /* broadcast to all subscribers */
+    
+    for (pctx = ctx->stream->ctx; pctx; pctx = pctx->next) {
+        if (pctx == ctx) {
+            continue;
+        }
+        
+        if (!pctx->flv_header_sent && ctx->flv_header) {
+            
+            if (ngx_http_live_send_message(pctx->r, ctx->flv_header, 0) != NGX_OK) {
+                continue;
+            }
+            
+            pctx->flv_header_sent = 1;
+            continue;
+        }
+        
+        if (!pctx->aac_header_sent && ctx->aac_header) {
+            
+            if (ngx_http_live_send_message(pctx->r, ctx->aac_header, 0) != NGX_OK) {
+                continue;
+            }
+            
+            pctx->aac_header_sent = 1;
+            continue;
+        }
+        
+        if (!pctx->avc_header_sent && ctx->avc_header) {
+            
+            if (ngx_http_live_send_message(pctx->r, ctx->avc_header, 0) != NGX_OK) {
+                continue;
+            }
+            
+            pctx->avc_header_sent = 1;
+            continue;
+        }
+        
+        // send the current package
+        
+        ngx_http_live_send_message(pctx->r, rpkt, 0);
+    }
+    
+    if (rpkt) {
+        ngx_http_live_free_shared_chain(lscf, rpkt);
     }
     
     return NGX_OK;
 }
 
-static void
+/*static*/ void
 ngx_http_live_close_stream(ngx_http_request_t *r)
 {
     ngx_http_live_ctx_t            *ctx, **cctx;//, *pctx;
@@ -325,88 +429,6 @@ ngx_http_live_close_stream(ngx_http_request_t *r)
     return;
 }
 
-static void
-ngx_http_live_close(ngx_http_request_t *r, ngx_int_t rc)
-{
-    // close stream here
-    
-    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "http_live: close stream");
-    
-    ngx_http_live_close_stream(r);
-    
-    ngx_http_finalize_request(r, rc);
-}
-
-static void
-ngx_http_live_send(ngx_event_t *wev)
-{
-    ngx_connection_t           *c;
-    ngx_http_request_t         *r;
-    ngx_int_t                   n;
-    ngx_http_live_ctx_t        *ctx;
-    ngx_buf_t                  *buf;
-    
-    c = wev->data;
-    r = c->data;
-    
-    if (c->destroyed) {
-        return;
-    }
-    
-    if (c->timedout) {
-        ngx_http_live_close(r, NGX_HTTP_OK);
-        return;
-    }
-    
-    if (wev->timer_set) {
-        ngx_del_timer(wev);
-    }
-    
-    ctx = ngx_http_get_module_ctx(r, ngx_http_live_module);
-    buf = ctx->buf;
-    
-    while (buf->pos < buf->last) {
-        n = c->send(c, buf->pos, buf->last - buf->pos);
-        if (n == NGX_AGAIN || n == 0) {
-            ngx_add_timer(c->write, 3000);
-            if (ngx_handle_write_event(c->write, 0) != NGX_OK) {
-                ngx_http_live_close(r, NGX_HTTP_OK);
-            }
-            return;
-        }
-        
-        if (n < 0) {
-            ngx_http_live_close(r, NGX_HTTP_OK);
-            return;
-        }
-        
-        buf->pos += n;
-    }
-    return;
-}
-
-static void
-ngx_http_live_recv(ngx_event_t *rev)
-{
-    ngx_int_t                   rc;
-    ngx_connection_t           *c;
-    ngx_http_request_t         *r;
-    static int                  x = 1;
-    
-    u_char buf[2];
-    
-    c = rev->data;
-    r = c->data;
-    
-    rc = c->recv(c, buf, 1);
-    if (rc == 0 || (rc == -1 && ngx_socket_errno != NGX_EAGAIN)) {
-        ngx_http_live_close(r, NGX_HTTP_OK);
-        printf("aaaa %d %d\n", (int)rc, x++);
-    }
-}
-
-//r->connection->write->handler = ngx_http_live_send;
-
 static ngx_int_t
 ngx_http_live_handler(ngx_http_request_t *r)
 {
@@ -450,7 +472,7 @@ ngx_http_live_handler(ngx_http_request_t *r)
     ngx_memzero(name, sizeof(name));
     ngx_memcpy(name, r->uri.data, ngx_min(r->uri.len, sizeof(name)-1));
     
-    rc = ngx_http_live_join(r, name, 1);
+    rc = ngx_http_live_join(r, name, 0);
     if (rc != NGX_OK) {
         return NGX_ERROR;
     }

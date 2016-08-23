@@ -554,6 +554,8 @@ ngx_int_t ngx_http_get_forwarded_addr(ngx_http_request_t *r, ngx_addr_t *addr,
     ngx_array_t *headers, ngx_str_t *value, ngx_array_t *proxies,
     int recursive);
 
+/*static*/ ngx_int_t
+ngx_http_core_find_location(ngx_http_request_t *r);
 
 extern ngx_module_t  ngx_http_core_module;
 
