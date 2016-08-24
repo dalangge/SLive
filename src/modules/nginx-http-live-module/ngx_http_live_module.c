@@ -395,9 +395,15 @@ ngx_http_live_close_stream(ngx_http_request_t *r)
 {
     ngx_http_live_ctx_t            *ctx, **cctx, *pctx;
     ngx_http_live_stream_t        **stream;
+    ngx_http_live_srv_conf_t        *lscf;
     ngx_http_live_loc_conf_t        *llcf;
     
-    llcf = ngx_http_get_module_ctx(r, ngx_http_live_module);
+    lscf = ngx_http_get_module_srv_conf(r, ngx_http_live_module);
+    if (lscf == NULL) {
+        return;
+    }
+    
+    llcf = ngx_http_get_module_loc_conf(r, ngx_http_live_module);
     if (llcf == NULL) {
         return;
     }
@@ -443,7 +449,7 @@ ngx_http_live_close_stream(ngx_http_request_t *r)
     
     if (ctx->stream->ctx) {
         ctx->stream = NULL;
-        return;
+        goto finish;
     }
     
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -452,7 +458,7 @@ ngx_http_live_close_stream(ngx_http_request_t *r)
     
     stream = ngx_http_live_get_stream(r, ctx->stream->name, 0);
     if (stream == NULL) {
-        return;
+        goto finish;
     }
     *stream = (*stream)->next;
     
@@ -460,7 +466,31 @@ ngx_http_live_close_stream(ngx_http_request_t *r)
     llcf->free_streams = ctx->stream;
     ctx->stream = NULL;
     
-    return;
+finish:
+    
+    // free stored
+    if (ctx->flv_header) {
+        ngx_http_live_free_shared_chain(lscf, ctx->flv_header);
+        ctx->flv_header = NULL;
+    }
+    
+    if (ctx->aac_header) {
+        ngx_http_live_free_shared_chain(lscf, ctx->aac_header);
+        ctx->aac_header = NULL;
+    }
+    
+    if (ctx->avc_header) {
+        ngx_http_live_free_shared_chain(lscf, ctx->avc_header);
+        ctx->avc_header = NULL;
+    }
+    
+    // free gop
+    
+    // free unsent chain
+    while (ctx->out_pos != ctx->out_last) {
+        ngx_http_live_free_shared_chain(lscf, ctx->out[ctx->out_pos++]);
+        ctx->out_pos %= ctx->out_queue;
+    }
 }
 
 static void
