@@ -90,7 +90,7 @@ ngx_http_live_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_live_srv_conf_t *conf = child;
     
     ngx_conf_merge_value(conf->chunk_size, prev->chunk_size, 4096);
-    ngx_conf_merge_size_value(conf->out_queue, prev->out_queue, 256);
+    ngx_conf_merge_size_value(conf->out_queue, prev->out_queue, 2560);
     ngx_conf_merge_size_value(conf->out_cork, prev->out_cork, conf->out_queue / 8);
 
     
@@ -264,6 +264,7 @@ ngx_http_live_av(ngx_http_request_t *r, ngx_chain_t *in, ngx_int_t type, ngx_int
     ngx_http_live_srv_conf_t        *lscf;
     ngx_http_live_loc_conf_t        *llcf;
     ngx_chain_t                     *rpkt;
+    ngx_int_t                        i;
     
     lscf = ngx_http_get_module_srv_conf(r, ngx_http_live_module);
     if (lscf == NULL) {
@@ -308,6 +309,26 @@ ngx_http_live_av(ngx_http_request_t *r, ngx_chain_t *in, ngx_int_t type, ngx_int
         ctx->avc_header = rpkt;
     }
     
+    if (type == LIVE_VIDEO && key_frame) {
+        for (i = 0; i < 1000; ++i) {
+            if (ctx->gop[i]) {
+                ngx_http_live_free_shared_chain(lscf, ctx->gop[i]);
+            }
+        }
+        ngx_memzero(ctx->gop, sizeof(ngx_chain_t*)*1000);
+    }
+    
+    // add to gop
+    if (type == LIVE_AUDIO || type == LIVE_VIDEO) {
+        for (i = 0; i < 1000; ++i) {
+            if (!ctx->gop[i]) {
+                ngx_http_acquire_shared_chain(rpkt);
+                ctx->gop[i] = rpkt;
+                break;
+            }
+        }
+    }
+    
     /* broadcast to all subscribers */
     
     for (pctx = ctx->stream->ctx; pctx; pctx = pctx->next) {
@@ -345,6 +366,18 @@ ngx_http_live_av(ngx_http_request_t *r, ngx_chain_t *in, ngx_int_t type, ngx_int
             continue;
         }
         
+        if (!pctx->gop_sent) {
+            
+            for (i = 0; i < 1000; ++i) {
+                if (ctx->gop[i]) {
+                    ngx_http_live_send_message(pctx->r, ctx->gop[i], 0);
+                }
+            }
+            
+            pctx->gop_sent = 1;
+            continue;
+        }
+        
         // send the current package
         
         ngx_http_live_send_message(pctx->r, rpkt, 0);
@@ -360,7 +393,7 @@ ngx_http_live_av(ngx_http_request_t *r, ngx_chain_t *in, ngx_int_t type, ngx_int
 /*static*/ void
 ngx_http_live_close_stream(ngx_http_request_t *r)
 {
-    ngx_http_live_ctx_t            *ctx, **cctx;//, *pctx;
+    ngx_http_live_ctx_t            *ctx, **cctx, *pctx;
     ngx_http_live_stream_t        **stream;
     ngx_http_live_loc_conf_t        *llcf;
     
@@ -395,16 +428,17 @@ ngx_http_live_close_stream(ngx_http_request_t *r)
     }
     
     if (ctx->publishing) {
-        /*if (!lacf->idle_streams) {
+        if (1 || !llcf->idle_streams) {
             for (pctx = ctx->stream->ctx; pctx; pctx = pctx->next) {
                 if (pctx->publishing == 0) {
-                    ss = pctx->session;
-                    ngx_log_debug0(NGX_LOG_DEBUG_RTMP, ss->connection->log, 0,
-                                   "live: no publisher");
-                    ngx_rtmp_finalize_session(ss);
+                    //ngx_log_debug0(NGX_LOG_DEBUG_RTMP, ss->connection->log, 0,
+                    //               "live: no publisher");
+                    
+                    printf("close no publisher\n");
+                    ngx_http_live_close_request(pctx->r);
                 }
             }
-        }*/
+        }
     }
     
     if (ctx->stream->ctx) {
@@ -427,6 +461,46 @@ ngx_http_live_close_stream(ngx_http_request_t *r)
     ctx->stream = NULL;
     
     return;
+}
+
+static void
+ngx_http_live_close_request_handler(ngx_event_t *e)
+{
+    ngx_connection_t      *c;
+    ngx_http_request_t         *r;
+    
+    c = e->data;
+    r = c->data;
+    printf("ngx_http_live_close_request_handler\n");
+    
+    ngx_http_live_close_stream(r);
+    ngx_http_finalize_request(r, NGX_OK);
+}
+
+
+void
+ngx_http_live_close_request(ngx_http_request_t *r)
+{
+    ngx_http_live_ctx_t        *ctx;
+    ngx_event_t                *e;
+    ngx_connection_t           *c;
+    
+    printf("ngx_http_live_close_request\n");
+    
+    ctx = ngx_http_get_module_ctx(r, ngx_http_live_module);
+    if (ctx == NULL) {
+        return;
+    }
+    
+    c = r->connection;
+    c->destroyed = 1;
+    
+    e = &ctx->close;
+    e->data = c;
+    e->handler = ngx_http_live_close_request_handler;
+    e->log = c->log;
+    
+    ngx_post_event(e, &ngx_posted_events);
 }
 
 static ngx_int_t
@@ -461,10 +535,10 @@ ngx_http_live_handler(ngx_http_request_t *r)
         return NGX_HTTP_NOT_ALLOWED;
     }
     
-    rc = ngx_http_discard_request_body(r);
+    /*rc = ngx_http_discard_request_body(r);
     if (rc != NGX_OK) {
         return rc;
-    }
+    }*/
     ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
                   "http_live: xxx %V %V %V", &r->exten, &r->uri,
                   &r->args);

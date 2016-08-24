@@ -17,14 +17,32 @@ ngx_http_live_recv(ngx_event_t *rev)
     ngx_connection_t           *c;
     ngx_http_request_t         *r;
     
-    u_char buf[2];
+    u_char buf[1024];
     
     c = rev->data;
     r = c->data;
     
-    rc = c->recv(c, buf, 1);
-    if (rc == 0 || (rc == -1 && ngx_socket_errno != NGX_EAGAIN)) {
-        ngx_http_live_close_stream(r);
+    if (c->destroyed) {
+        return;
+    }
+    
+    if (rev->timer_set) {
+        ngx_del_timer(rev);
+    }
+    
+    // discard recv data
+    rc = c->recv(c, buf, 1024);
+    printf("ngx_http_live_recv    %d\n", (int)rc);
+    if (rc == NGX_ERROR || rc == 0) {
+        printf("ngx_http_live_recv\n");
+        ngx_http_live_close_request(r);
+        return;
+    }
+    
+    if (rc == NGX_AGAIN) {
+        if (ngx_handle_read_event(c->read, 0) != NGX_OK) {
+            ngx_http_live_close_request(r);
+        }
     }
 }
 
@@ -50,7 +68,7 @@ ngx_http_live_send(ngx_event_t *wev)
         ngx_log_error(NGX_LOG_INFO, c->log, NGX_ETIMEDOUT,
                       "client timed out");
         c->timedout = 1;
-        ngx_http_live_close_stream(r);
+        ngx_http_live_close_request(r);
         return;
     }
     
@@ -69,13 +87,13 @@ ngx_http_live_send(ngx_event_t *wev)
         if (n == NGX_AGAIN || n == 0) {
             ngx_add_timer(c->write, ctx->timeout);
             if (ngx_handle_write_event(c->write, 0) != NGX_OK) {
-                ngx_http_live_close_stream(r);
+                ngx_http_live_close_request(r);
             }
             return;
         }
         
         if (n < 0) {
-            ngx_http_live_close_stream(r);
+            ngx_http_live_close_request(r);
             return;
         }
         

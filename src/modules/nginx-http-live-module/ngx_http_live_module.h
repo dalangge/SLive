@@ -35,17 +35,22 @@ struct ngx_http_live_ctx_s {
     ngx_http_live_ctx_t                *next;
     unsigned                            publishing:1;
     
+    ngx_event_t                         close;
+    
     // for publisher
     ngx_chain_t                        *flv_header;
     ngx_chain_t                        *aac_header;
     ngx_chain_t                        *avc_header;
     ngx_chain_t                        *meta;
     
+    ngx_chain_t                        *gop[1000];
+    
     // for subscriber
     unsigned                            flv_header_sent:1;
     unsigned                            aac_header_sent:1;
     unsigned                            avc_header_sent:1;
     unsigned                            meta_sent:1;
+    unsigned                            gop_sent:1;
     
     /* circular buffer of HTTP message pointers */
     ngx_msec_t                          timeout;
@@ -85,8 +90,10 @@ struct ngx_http_live_srv_conf_s {
 };
 
 ngx_int_t ngx_http_live_join(ngx_http_request_t *r, u_char *name, unsigned publisher);
-void ngx_http_live_close_stream(ngx_http_request_t *r);
 ngx_int_t ngx_http_live_av(ngx_http_request_t *r, ngx_chain_t *in, ngx_int_t type, ngx_int_t key_frame);
+void ngx_http_live_close_stream(ngx_http_request_t *r);
+
+void ngx_http_live_close_request(ngx_http_request_t *r);
 
 extern ngx_module_t  ngx_http_live_module;
 
