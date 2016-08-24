@@ -711,7 +711,7 @@ static ngx_int_t
 ngx_http_live_stat_handler(ngx_http_request_t *r)
 {
     ngx_http_live_stat_loc_conf_t       *slcf;
- //   ngx_rtmp_core_main_conf_t      *cmcf;
+    ngx_http_core_main_conf_t      *cmcf;
  //   ngx_rtmp_core_srv_conf_t      **cscf;
     ngx_chain_t                    *cl, *l, **ll, ***lll;
 //    size_t                          n;
@@ -724,10 +724,11 @@ ngx_http_live_stat_handler(ngx_http_request_t *r)
         return NGX_DECLINED;
     }
     
-    /*cmcf = ngx_rtmp_core_main_conf;
+    
+    cmcf = ngx_http_cycle_get_module_main_conf(ngx_cycle, ngx_http_core_module);
     if (cmcf == NULL) {
         goto error;
-    }*/
+    }
     
     cl = NULL;
     ll = &cl;
@@ -791,11 +792,10 @@ ngx_http_live_stat_handler(ngx_http_request_t *r)
     (*ll)->buf->last_buf = 1;
     return ngx_http_output_filter(r, cl);
     
-/*error:
+error:
     r->headers_out.status = NGX_HTTP_INTERNAL_SERVER_ERROR;
     r->headers_out.content_length_n = 0;
     return ngx_http_send_header(r);
- */
 }
 
 
