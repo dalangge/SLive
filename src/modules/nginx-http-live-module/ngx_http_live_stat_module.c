@@ -8,7 +8,7 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 #include <nginx.h>
-
+#include "ngx_http_core_module.h"
 #include "ngx_http_live_module.h"
 
 static char * ngx_http_live_stat(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
@@ -683,38 +683,136 @@ ngx_rtmp_stat_application(ngx_http_request_t *r, ngx_chain_t ***lll,
     
     NGX_RTMP_STAT_L("</application>\r\n");
 }
+*/
 
-
-static void
-ngx_rtmp_stat_server(ngx_http_request_t *r, ngx_chain_t ***lll,
-                     ngx_rtmp_core_srv_conf_t *cscf)
+void traversing_tree(ngx_http_location_tree_node_t *node)
 {
-    ngx_rtmp_core_app_conf_t      **cacf;
-    size_t                          n;
+    ngx_http_core_loc_conf_t   *clcf;
     
-    NGX_RTMP_STAT_L("<server>\r\n");
     
-#ifdef NGX_RTMP_POOL_DEBUG
-    ngx_rtmp_stat_dump_pool(r, lll, cscf->pool);
-#endif
-    
-    cacf = cscf->applications.elts;
-    for (n = 0; n < cscf->applications.nelts; ++n, ++cacf) {
-        ngx_rtmp_stat_application(r, lll, *cacf);
+    if (node == NULL)
+    {
+        //printf("adasd\n");
+        return;
     }
     
-    NGX_RTMP_STAT_L("</server>\r\n");
+    clcf = node->exact ? node->exact : node->inclusive;
+    
+    if (clcf) {
+        int n = 0;
+        ngx_http_live_loc_conf_t * p =  clcf->loc_conf[ngx_http_live_module.ctx_index];
+        if (p) {
+            n = p->live;
+        }
+        
+        printf("xxx %d %s %d\n", (int)clcf->name.len, clcf->name.data, n);
+    }
+    
+    traversing_tree(node->left);
+    traversing_tree(node->right);
+    traversing_tree(node->tree);
 }
-*/
+
+static void
+ngx_http_live_stat_server(ngx_http_request_t *r, ngx_chain_t ***lll,
+                     ngx_http_core_srv_conf_t *cscf)
+{
+    ngx_queue_t                *q, *locations;
+    ngx_http_core_loc_conf_t   *clcf;
+    ngx_http_location_queue_t  *lq;
+    
+
+    
+    
+    NGX_HTTP_LIVE_STAT_L("<server>\r\n");
+    NGX_HTTP_LIVE_STAT_L("<name>");
+    NGX_HTTP_LIVE_STAT_ES(&cscf->server_name);
+    NGX_HTTP_LIVE_STAT_L("</name>\r\n");
+    
+#ifdef NGX_HTTP_LIVE_POOL_DEBUG
+    ngx_http_live_stat_dump_pool(r, lll, cscf->pool);
+#endif
+    
+    clcf = cscf->ctx->loc_conf[ngx_http_core_module.ctx_index];
+    
+    locations = clcf->locations1;
+    
+    if (locations == NULL) {
+         NGX_HTTP_LIVE_STAT_L("</server>\r\n");
+        return;
+    }
+    
+    if (ngx_queue_empty(locations)) {
+         NGX_HTTP_LIVE_STAT_L("</server>\r\n");
+        return;
+    }
+    
+    traversing_tree(clcf->static_locations);
+#if (NGX_PCRE)
+ //   traversing_tree(clcf->regex_locations);
+#endif
+    
+    if (1) {
+        //ngx_http_core_loc_conf_t   **clcfp;
+        //for (clcfp = clcf->regex_locations; *clcfp; clcfp++) {
+            
+        //    printf("zzzz  \n");
+            //printf("zzzz  %s\n", (*clcfp)->name.data);
+            
+        //}
+    }
+
+    for (q = ngx_queue_head(locations); q != ngx_queue_last(locations) && 0;
+         //q != ngx_queue_sentinel(locations);
+         q = ngx_queue_next(q))
+    {
+        //printf("xxxxxxx\n");
+        lq = (ngx_http_location_queue_t *) q;
+        
+        clcf = lq->exact ? lq->exact : lq->inclusive;
+        //if (clcf && clcf->name.len) {}
+        //printf("%d %s \n", (int)clcf->name.len, clcf->name.data);
+        
+        int n = 0;
+        ngx_http_live_loc_conf_t * p =  clcf->loc_conf[ngx_http_live_module.ctx_index];
+        if (p) {
+            int i = 0;
+            for (; i < p->nbuckets; ++i) {
+                if (p->streams[i]) {
+                    printf("%s\n", p->streams[i]->name);
+                }
+            }
+            n = p->live;
+        }
+        printf("%d %s %d\n", (int)clcf->name.len, clcf->name.data, n);
+        
+        
+        //printf("%s \n", lq->name->data);
+        //break;
+    }
+
+    
+//    for (/*clcfp = cscf->named_locations*/; clcfp; clcfp++) {
+        
+        //printf("%s\n", clcfp->name.data);
+  //  }
+    
+    //for (clcfp = cscf->named_locations; *clcfp; clcfp++) {
+     //   ngx_rtmp_stat_application(r, lll, *cacfp);
+    //}
+    
+    NGX_HTTP_LIVE_STAT_L("</server>\r\n");
+}
+
 
 static ngx_int_t
 ngx_http_live_stat_handler(ngx_http_request_t *r)
 {
-    ngx_http_live_stat_loc_conf_t       *slcf;
+    ngx_http_live_stat_loc_conf_t  *slcf;
     ngx_http_core_main_conf_t      *cmcf;
- //   ngx_rtmp_core_srv_conf_t      **cscf;
+    ngx_http_core_srv_conf_t      **cscf;
     ngx_chain_t                    *cl, *l, **ll, ***lll;
-//    size_t                          n;
+    size_t                          n;
     off_t                           len;
     static u_char                   tbuf[NGX_TIME_T_LEN];
     static u_char                   nbuf[NGX_INT_T_LEN];
@@ -724,10 +822,39 @@ ngx_http_live_stat_handler(ngx_http_request_t *r)
         return NGX_DECLINED;
     }
     
-    
     cmcf = ngx_http_cycle_get_module_main_conf(ngx_cycle, ngx_http_core_module);
     if (cmcf == NULL) {
         goto error;
+    }
+    
+    if (0) {
+        
+        ngx_http_core_loc_conf_t       *clcf;
+        size_t                          s;
+        ngx_http_core_srv_conf_t   **cscfp;
+        
+        ngx_queue_t                *q, *locations;
+        ngx_http_location_queue_t  *lq;
+        
+
+        cscfp = cmcf->servers.elts;
+        for (s = 0; s < cmcf->servers.nelts; s++) {
+            
+            clcf = cscfp[s]->ctx->loc_conf[ngx_http_core_module.ctx_index];
+            
+            locations = clcf->locations1;
+            printf("axxxxxxxx\n");
+            for (q = ngx_queue_head(locations);
+                 q != ngx_queue_sentinel(locations);
+                 q = ngx_queue_next(q))
+            {
+                lq = (ngx_http_location_queue_t *) q;
+                clcf = lq->exact ? lq->exact : lq->inclusive;
+                
+                printf("%s \n", clcf->name.data);
+            }
+        
+        }
     }
     
     cl = NULL;
@@ -741,7 +868,7 @@ ngx_http_live_stat_handler(ngx_http_request_t *r)
         NGX_HTTP_LIVE_STAT_L("\" ?>\r\n");
     }
    
-    NGX_HTTP_LIVE_STAT_L("<rtmp>\r\n");
+    NGX_HTTP_LIVE_STAT_L("<http_live>\r\n");
     
 #ifdef NGINX_VERSION
     NGX_HTTP_LIVE_STAT_L("<nginx_version>" NGINX_VERSION "</nginx_version>\r\n");
@@ -773,13 +900,13 @@ ngx_http_live_stat_handler(ngx_http_request_t *r)
     
   /*  ngx_rtmp_stat_bw(r, lll, &ngx_rtmp_bw_in, "in", NGX_RTMP_STAT_BW_BYTES);
     ngx_rtmp_stat_bw(r, lll, &ngx_rtmp_bw_out, "out", NGX_RTMP_STAT_BW_BYTES);
-    
+    */
     cscf = cmcf->servers.elts;
     for (n = 0; n < cmcf->servers.nelts; ++n, ++cscf) {
-        ngx_rtmp_stat_server(r, lll, *cscf);
+        ngx_http_live_stat_server(r, lll, *cscf);
     }
-    */
-    NGX_HTTP_LIVE_STAT_L("</rtmp>\r\n");
+   
+    NGX_HTTP_LIVE_STAT_L("</http_live>\r\n");
     
     len = 0;
     for (l = cl; l; l = l->next) {

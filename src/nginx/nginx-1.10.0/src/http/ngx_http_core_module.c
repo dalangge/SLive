@@ -1599,10 +1599,6 @@ ngx_http_core_find_static_location(ngx_http_request_t *r,
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                        "test location: \"%*s\"",
                        (size_t) node->len, node->name);
-        
-        ngx_log_debug4(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "test location: %s %d \"%*s\"",
-                        uri, len, (size_t) node->len, node->name);
 
         n = (len <= (size_t) node->len) ? len : node->len;
 
@@ -3252,7 +3248,7 @@ ngx_http_core_location(ngx_conf_t *cf, ngx_command_t *cmd, void *dummy)
     if (ngx_http_add_location(cf, &pclcf->locations, clcf) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
-
+    
     save = *cf;
     cf->ctx = ctx;
     cf->cmd_type = NGX_HTTP_LOC_CONF;
