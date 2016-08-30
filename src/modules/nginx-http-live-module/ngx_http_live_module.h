@@ -34,7 +34,6 @@ struct ngx_http_live_ctx_s {
     ngx_http_live_stream_t             *stream;
     ngx_http_live_ctx_t                *next;
     unsigned                            publishing:1;
-    
     ngx_event_t                         close;
     
     // for publisher
@@ -43,7 +42,10 @@ struct ngx_http_live_ctx_s {
     ngx_chain_t                        *avc_header;
     ngx_chain_t                        *meta;
     
-    ngx_chain_t                        *gop[1000];
+    size_t                              gop_pos, gop_last;
+    size_t                              gop_queue;
+    size_t                              gop_size;
+    ngx_chain_t                       **gop;
     
     // for subscriber
     unsigned                            flv_header_sent:1;
@@ -78,21 +80,23 @@ struct ngx_http_live_loc_conf_s {
     ngx_flag_t                          idle_streams;
     ngx_pool_t                         *pool;
     ngx_http_live_stream_t             *free_streams;
-    
+    size_t                              out_cork;
+    size_t                              out_queue;
+    size_t                              gop_queue;
+    size_t                              gop_size;
 };
 
 struct ngx_http_live_srv_conf_s {
     ngx_pool_t                         *pool;
     ngx_chain_t                        *free;           // chain reuse
     ngx_int_t                           chunk_size;
-    size_t                              out_cork;
-    size_t                              out_queue;
 };
 
 ngx_int_t ngx_http_live_join(ngx_http_request_t *r, u_char *name, unsigned publisher);
 ngx_int_t ngx_http_live_av(ngx_http_request_t *r, ngx_chain_t *in, ngx_int_t type, ngx_int_t key_frame);
 void ngx_http_live_close_stream(ngx_http_request_t *r);
 
+/* asynchronous close http close */
 void ngx_http_live_close_request(ngx_http_request_t *r);
 
 extern ngx_module_t  ngx_http_live_module;

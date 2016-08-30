@@ -131,7 +131,7 @@ ngx_http_live_send_message(ngx_http_request_t *r, ngx_chain_t *out,
     
     ctx = ngx_http_get_module_ctx(r, ngx_http_live_module);
     
-    nmsg = (ctx->out_last - ctx->out_pos) % ctx->out_queue + 1;
+    nmsg = (ctx->out_queue + ctx->out_last - ctx->out_pos) % ctx->out_queue + 1;
     
     if (priority > 3) {
         priority = 3;
