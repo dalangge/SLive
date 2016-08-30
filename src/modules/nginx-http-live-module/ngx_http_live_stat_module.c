@@ -391,64 +391,60 @@ ngx_rtmp_stat_get_avc_profile(ngx_uint_t p) {
 }
 */
 
-/*
+
 static void
-ngx_rtmp_stat_live(ngx_http_request_t *r, ngx_chain_t ***lll,
-                   ngx_rtmp_live_app_conf_t *lacf)
+ngx_http_live_stat_live(ngx_http_request_t *r, ngx_chain_t ***lll,
+                   ngx_http_live_loc_conf_t *llcf)
 {
-    ngx_rtmp_live_stream_t         *stream;
-    ngx_rtmp_codec_ctx_t           *codec;
-    ngx_rtmp_live_ctx_t            *ctx;
-    ngx_rtmp_session_t             *s;
+    ngx_http_live_stream_t         *stream;
+    //ngx_rtmp_codec_ctx_t           *codec;
+    ngx_http_live_ctx_t            *ctx;
+    //ngx_http_request_t             *rr;
     ngx_int_t                       n;
     ngx_uint_t                      nclients, total_nclients;
     u_char                          buf[NGX_INT_T_LEN];
-    u_char                          bbuf[NGX_INT32_LEN];
-    ngx_rtmp_stat_loc_conf_t       *slcf;
-    u_char                         *cname;
+    //u_char                          bbuf[NGX_INT32_LEN];
+    ngx_http_live_stat_loc_conf_t  *slcf;
+    //u_char                         *cname;
     
-    if (!lacf->live) {
-        return;
-    }
     
-    slcf = ngx_http_get_module_loc_conf(r, ngx_rtmp_stat_module);
+    slcf = ngx_http_get_module_loc_conf(r, ngx_http_live_stat_module);
     
-    NGX_RTMP_STAT_L("<live>\r\n");
+    NGX_HTTP_LIVE_STAT_L("<live>\r\n");
     
     total_nclients = 0;
-    for (n = 0; n < lacf->nbuckets; ++n) {
-        for (stream = lacf->streams[n]; stream; stream = stream->next) {
-            NGX_RTMP_STAT_L("<stream>\r\n");
+    for (n = 0; n < llcf->nbuckets; ++n) {
+        for (stream = llcf->streams[n]; stream; stream = stream->next) {
+            NGX_HTTP_LIVE_STAT_L("<stream>\r\n");
             
-            NGX_RTMP_STAT_L("<name>");
-            NGX_RTMP_STAT_ECS(stream->name);
-            NGX_RTMP_STAT_L("</name>\r\n");
+            NGX_HTTP_LIVE_STAT_L("<name>");
+            NGX_HTTP_LIVE_STAT_ECS(stream->name);
+            NGX_HTTP_LIVE_STAT_L("</name>\r\n");
             
-            NGX_RTMP_STAT_L("<time>");
-            NGX_RTMP_STAT(buf, ngx_snprintf(buf, sizeof(buf), "%i",
-                                            (ngx_int_t) (ngx_current_msec - stream->epoch))
-                          - buf);
-            NGX_RTMP_STAT_L("</time>");
+            NGX_HTTP_LIVE_STAT_L("<time>");
+            NGX_HTTP_LIVE_STAT(buf, ngx_snprintf(buf, sizeof(buf), "%i",
+                                            (ngx_int_t) (ngx_current_msec - stream->epoch)) - buf);
+            NGX_HTTP_LIVE_STAT_L("</time>");
             
-            ngx_rtmp_stat_bw(r, lll, &stream->bw_in, "in",
+            /*ngx_rtmp_stat_bw(r, lll, &stream->bw_in, "in",
                              NGX_RTMP_STAT_BW_BYTES);
             ngx_rtmp_stat_bw(r, lll, &stream->bw_out, "out",
                              NGX_RTMP_STAT_BW_BYTES);
             ngx_rtmp_stat_bw(r, lll, &stream->bw_in_audio, "audio",
                              NGX_RTMP_STAT_BW);
             ngx_rtmp_stat_bw(r, lll, &stream->bw_in_video, "video",
-                             NGX_RTMP_STAT_BW);
+                             NGX_RTMP_STAT_BW);*/
             
             nclients = 0;
-            codec = NULL;
+            //codec = NULL;
             for (ctx = stream->ctx; ctx; ctx = ctx->next, ++nclients) {
-                s = ctx->session;
-                if (slcf->stat & NGX_RTMP_STAT_CLIENTS) {
-                    NGX_RTMP_STAT_L("<client>");
+                //rr = ctx->r;
+                if (slcf->stat & NGX_HTTP_LIVE_STAT_CLIENTS) {
+                    NGX_HTTP_LIVE_STAT_L("<client>");
                     
-                    ngx_rtmp_stat_client(r, lll, s);
+                    //ngx_rtmp_stat_client(r, lll, s);
                     
-                    NGX_RTMP_STAT_L("<dropped>");
+                    /*NGX_RTMP_STAT_L("<dropped>");
                     NGX_RTMP_STAT(buf, ngx_snprintf(buf, sizeof(buf),
                                                     "%ui", ctx->ndropped) - buf);
                     NGX_RTMP_STAT_L("</dropped>");
@@ -464,25 +460,25 @@ ngx_rtmp_stat_live(ngx_http_request_t *r, ngx_chain_t ***lll,
                     NGX_RTMP_STAT_L("<timestamp>");
                     NGX_RTMP_STAT(bbuf, ngx_snprintf(bbuf, sizeof(bbuf),
                                                      "%D", s->current_time) - bbuf);
-                    NGX_RTMP_STAT_L("</timestamp>");
+                    NGX_RTMP_STAT_L("</timestamp>");*/
                     
                     if (ctx->publishing) {
-                        NGX_RTMP_STAT_L("<publishing/>");
+                        NGX_HTTP_LIVE_STAT_L("<publishing/>");
                     }
                     
-                    if (ctx->active) {
+                    /*if (ctx->active) {
                         NGX_RTMP_STAT_L("<active/>");
-                    }
+                    }*/
                     
-                    NGX_RTMP_STAT_L("</client>\r\n");
+                    NGX_HTTP_LIVE_STAT_L("</client>\r\n");
                 }
-                if (ctx->publishing) {
+                /*if (ctx->publishing) {
                     codec = ngx_rtmp_get_module_ctx(s, ngx_rtmp_codec_module);
-                }
+                }*/
             }
             total_nclients += nclients;
             
-            if (codec) {
+            /*if (codec) {
                 NGX_RTMP_STAT_L("<meta>");
                 
                 NGX_RTMP_STAT_L("<video>");
@@ -558,33 +554,33 @@ ngx_rtmp_stat_live(ngx_http_request_t *r, ngx_chain_t ***lll,
                 NGX_RTMP_STAT_L("</audio>");
                 
                 NGX_RTMP_STAT_L("</meta>\r\n");
-            }
+            }*/
             
-            NGX_RTMP_STAT_L("<nclients>");
-            NGX_RTMP_STAT(buf, ngx_snprintf(buf, sizeof(buf),
+            NGX_HTTP_LIVE_STAT_L("<nclients>");
+            NGX_HTTP_LIVE_STAT(buf, ngx_snprintf(buf, sizeof(buf),
                                             "%ui", nclients) - buf);
-            NGX_RTMP_STAT_L("</nclients>\r\n");
+            NGX_HTTP_LIVE_STAT_L("</nclients>\r\n");
             
             if (stream->publishing) {
-                NGX_RTMP_STAT_L("<publishing/>\r\n");
+                NGX_HTTP_LIVE_STAT_L("<publishing/>\r\n");
             }
             
-            if (stream->active) {
+            /*if (stream->active) {
                 NGX_RTMP_STAT_L("<active/>\r\n");
-            }
+            }*/
             
-            NGX_RTMP_STAT_L("</stream>\r\n");
+            NGX_HTTP_LIVE_STAT_L("</stream>\r\n");
         }
     }
     
-    NGX_RTMP_STAT_L("<nclients>");
-    NGX_RTMP_STAT(buf, ngx_snprintf(buf, sizeof(buf),
+    NGX_HTTP_LIVE_STAT_L("<nclients>");
+    NGX_HTTP_LIVE_STAT(buf, ngx_snprintf(buf, sizeof(buf),
                                     "%ui", total_nclients) - buf);
-    NGX_RTMP_STAT_L("</nclients>\r\n");
+    NGX_HTTP_LIVE_STAT_L("</nclients>\r\n");
     
-    NGX_RTMP_STAT_L("</live>\r\n");
+    NGX_HTTP_LIVE_STAT_L("</live>\r\n");
 }
-*/
+
 /*
 static void
 ngx_rtmp_stat_play(ngx_http_request_t *r, ngx_chain_t ***lll,
@@ -657,21 +653,29 @@ ngx_rtmp_stat_play(ngx_http_request_t *r, ngx_chain_t ***lll,
     NGX_RTMP_STAT_L("</play>\r\n");
 }
 */
-/*
+
+
+
 static void
-ngx_rtmp_stat_application(ngx_http_request_t *r, ngx_chain_t ***lll,
-                          ngx_rtmp_core_app_conf_t *cacf)
+ngx_http_stat_location(ngx_http_request_t *r, ngx_chain_t ***lll,
+                       ngx_http_core_loc_conf_t *clcf)
 {
-    ngx_rtmp_stat_loc_conf_t       *slcf;
+    ngx_http_live_loc_conf_t       *llcf;
     
-    NGX_RTMP_STAT_L("<application>\r\n");
-    NGX_RTMP_STAT_L("<name>");
-    NGX_RTMP_STAT_ES(&cacf->name);
-    NGX_RTMP_STAT_L("</name>\r\n");
     
-    slcf = ngx_http_get_module_loc_conf(r, ngx_rtmp_stat_module);
+    llcf =  clcf->loc_conf[ngx_http_live_module.ctx_index];
+    if (llcf == NULL || !llcf->live) {
+        return;
+    }
     
-    if (slcf->stat & NGX_RTMP_STAT_LIVE) {
+    NGX_HTTP_LIVE_STAT_L("<location>\r\n");
+    NGX_HTTP_LIVE_STAT_L("<name>");
+    NGX_HTTP_LIVE_STAT_ES(&clcf->name);
+    NGX_HTTP_LIVE_STAT_L("</name>\r\n");
+    
+    ngx_http_live_stat_live(r, lll, llcf);
+    
+    /*if (slcf->stat & NGX_RTMP_STAT_LIVE) {
         ngx_rtmp_stat_live(r, lll,
                            cacf->app_conf[ngx_rtmp_live_module.ctx_index]);
     }
@@ -679,50 +683,37 @@ ngx_rtmp_stat_application(ngx_http_request_t *r, ngx_chain_t ***lll,
     if (slcf->stat & NGX_RTMP_STAT_PLAY) {
         ngx_rtmp_stat_play(r, lll,
                            cacf->app_conf[ngx_rtmp_play_module.ctx_index]);
-    }
+    }*/
     
-    NGX_RTMP_STAT_L("</application>\r\n");
+    NGX_HTTP_LIVE_STAT_L("</location>\r\n");
 }
-*/
+                       
 
-void traversing_tree(ngx_http_location_tree_node_t *node)
+static void
+ngx_http_stat_static_location(ngx_http_request_t *r, ngx_chain_t ***lll,
+                              ngx_http_location_tree_node_t *node)
 {
     ngx_http_core_loc_conf_t   *clcf;
     
-    
     if (node == NULL)
-    {
-        //printf("adasd\n");
         return;
-    }
     
     clcf = node->exact ? node->exact : node->inclusive;
     
     if (clcf) {
-        int n = 0;
-        ngx_http_live_loc_conf_t * p =  clcf->loc_conf[ngx_http_live_module.ctx_index];
-        if (p) {
-            n = p->live;
-        }
-        
-        printf("xxx %d %s %d\n", (int)clcf->name.len, clcf->name.data, n);
+        ngx_http_stat_location(r, lll, clcf);
     }
     
-    traversing_tree(node->left);
-    traversing_tree(node->right);
-    traversing_tree(node->tree);
+    ngx_http_stat_static_location(r, lll, node->left);
+    ngx_http_stat_static_location(r, lll, node->right);
+    ngx_http_stat_static_location(r, lll, node->tree);
 }
 
 static void
 ngx_http_live_stat_server(ngx_http_request_t *r, ngx_chain_t ***lll,
                      ngx_http_core_srv_conf_t *cscf)
 {
-    ngx_queue_t                *q, *locations;
     ngx_http_core_loc_conf_t   *clcf;
-    ngx_http_location_queue_t  *lq;
-    
-
-    
     
     NGX_HTTP_LIVE_STAT_L("<server>\r\n");
     NGX_HTTP_LIVE_STAT_L("<name>");
@@ -735,67 +726,10 @@ ngx_http_live_stat_server(ngx_http_request_t *r, ngx_chain_t ***lll,
     
     clcf = cscf->ctx->loc_conf[ngx_http_core_module.ctx_index];
     
-    locations = clcf->locations1;
-    
-    if (locations == NULL) {
-         NGX_HTTP_LIVE_STAT_L("</server>\r\n");
-        return;
+    // only support static locations right now
+    if (clcf && clcf->static_locations) {
+        ngx_http_stat_static_location(r, lll, clcf->static_locations);
     }
-    
-    if (ngx_queue_empty(locations)) {
-         NGX_HTTP_LIVE_STAT_L("</server>\r\n");
-        return;
-    }
-    
-    traversing_tree(clcf->static_locations);
-#if (NGX_PCRE)
- //   traversing_tree(clcf->regex_locations);
-#endif
-    
-    if (1) {
-        //ngx_http_core_loc_conf_t   **clcfp;
-        //for (clcfp = clcf->regex_locations; *clcfp; clcfp++) {
-            
-        //    printf("zzzz  \n");
-            //printf("zzzz  %s\n", (*clcfp)->name.data);
-            
-        //}
-    }
-
-    for (q = ngx_queue_head(locations); q != ngx_queue_last(locations) && 0;
-         //q != ngx_queue_sentinel(locations);
-         q = ngx_queue_next(q))
-    {
-        //printf("xxxxxxx\n");
-        lq = (ngx_http_location_queue_t *) q;
-        
-        clcf = lq->exact ? lq->exact : lq->inclusive;
-        //if (clcf && clcf->name.len) {}
-        //printf("%d %s \n", (int)clcf->name.len, clcf->name.data);
-        
-        int n = 0;
-        ngx_http_live_loc_conf_t * p =  clcf->loc_conf[ngx_http_live_module.ctx_index];
-        if (p) {
-            int i = 0;
-            for (; i < p->nbuckets; ++i) {
-                if (p->streams[i]) {
-                    printf("%s\n", p->streams[i]->name);
-                }
-            }
-            n = p->live;
-        }
-        printf("%d %s %d\n", (int)clcf->name.len, clcf->name.data, n);
-        
-        
-        //printf("%s \n", lq->name->data);
-        //break;
-    }
-
-    
-//    for (/*clcfp = cscf->named_locations*/; clcfp; clcfp++) {
-        
-        //printf("%s\n", clcfp->name.data);
-  //  }
     
     //for (clcfp = cscf->named_locations; *clcfp; clcfp++) {
      //   ngx_rtmp_stat_application(r, lll, *cacfp);
@@ -825,36 +759,6 @@ ngx_http_live_stat_handler(ngx_http_request_t *r)
     cmcf = ngx_http_cycle_get_module_main_conf(ngx_cycle, ngx_http_core_module);
     if (cmcf == NULL) {
         goto error;
-    }
-    
-    if (0) {
-        
-        ngx_http_core_loc_conf_t       *clcf;
-        size_t                          s;
-        ngx_http_core_srv_conf_t   **cscfp;
-        
-        ngx_queue_t                *q, *locations;
-        ngx_http_location_queue_t  *lq;
-        
-
-        cscfp = cmcf->servers.elts;
-        for (s = 0; s < cmcf->servers.nelts; s++) {
-            
-            clcf = cscfp[s]->ctx->loc_conf[ngx_http_core_module.ctx_index];
-            
-            locations = clcf->locations1;
-            printf("axxxxxxxx\n");
-            for (q = ngx_queue_head(locations);
-                 q != ngx_queue_sentinel(locations);
-                 q = ngx_queue_next(q))
-            {
-                lq = (ngx_http_location_queue_t *) q;
-                clcf = lq->exact ? lq->exact : lq->inclusive;
-                
-                printf("%s \n", clcf->name.data);
-            }
-        
-        }
     }
     
     cl = NULL;
