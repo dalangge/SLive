@@ -307,31 +307,29 @@ ngx_http_live_stat_dump_pool(ngx_http_request_t *r, ngx_chain_t ***lll,
 #endif
 
 
-/*
 static void
-ngx_rtmp_stat_client(ngx_http_request_t *r, ngx_chain_t ***lll,
-                     ngx_rtmp_session_t *s)
+ngx_http_live_stat_client(ngx_http_request_t *r, ngx_chain_t ***lll)
 {
     u_char  buf[NGX_INT_T_LEN];
     
 #ifdef NGX_RTMP_POOL_DEBUG
     ngx_rtmp_stat_dump_pool(r, lll, s->connection->pool);
 #endif
-    NGX_RTMP_STAT_L("<id>");
-    NGX_RTMP_STAT(buf, ngx_snprintf(buf, sizeof(buf), "%ui",
-                                    (ngx_uint_t) s->connection->number) - buf);
-    NGX_RTMP_STAT_L("</id>");
+    NGX_HTTP_LIVE_STAT_L("<id>");
+    NGX_HTTP_LIVE_STAT(buf, ngx_snprintf(buf, sizeof(buf), "%ui",
+                                    (ngx_uint_t) r->connection->number) - buf);
+    NGX_HTTP_LIVE_STAT_L("</id>");
     
-    NGX_RTMP_STAT_L("<address>");
-    NGX_RTMP_STAT_ES(&s->connection->addr_text);
-    NGX_RTMP_STAT_L("</address>");
+    NGX_HTTP_LIVE_STAT_L("<address>");
+    NGX_HTTP_LIVE_STAT_ES(&r->connection->addr_text);
+    NGX_HTTP_LIVE_STAT_L("</address>");
     
-    NGX_RTMP_STAT_L("<time>");
-    NGX_RTMP_STAT(buf, ngx_snprintf(buf, sizeof(buf), "%i",
-                                    (ngx_int_t) (ngx_current_msec - s->epoch)) - buf);
-    NGX_RTMP_STAT_L("</time>");
+//    NGX_HTTP_LIVE_STAT_L("<time>");
+//    NGX_HTTP_LIVE_STAT(buf, ngx_snprintf(buf, sizeof(buf), "%i",
+//                                    (ngx_int_t) (ngx_current_msec - r->epoch)) - buf);
+//    NGX_HTTP_LIVE_STAT_L("</time>");
     
-    if (s->flashver.len) {
+    /*if (s->flashver.len) {
         NGX_RTMP_STAT_L("<flashver>");
         NGX_RTMP_STAT_ES(&s->flashver);
         NGX_RTMP_STAT_L("</flashver>");
@@ -347,10 +345,10 @@ ngx_rtmp_stat_client(ngx_http_request_t *r, ngx_chain_t ***lll,
         NGX_RTMP_STAT_L("<swfurl>");
         NGX_RTMP_STAT_ES(&s->swf_url);
         NGX_RTMP_STAT_L("</swfurl>");
-    }
+    }*/
 }
 
-
+/*
 static char *
 ngx_rtmp_stat_get_aac_profile(ngx_uint_t p, ngx_uint_t sbr, ngx_uint_t ps) {
     switch (p) {
@@ -399,7 +397,7 @@ ngx_http_live_stat_live(ngx_http_request_t *r, ngx_chain_t ***lll,
     ngx_http_live_stream_t         *stream;
     //ngx_rtmp_codec_ctx_t           *codec;
     ngx_http_live_ctx_t            *ctx;
-    //ngx_http_request_t             *rr;
+    ngx_http_request_t             *rr;
     ngx_int_t                       n;
     ngx_uint_t                      nclients, total_nclients;
     u_char                          buf[NGX_INT_T_LEN];
@@ -438,11 +436,11 @@ ngx_http_live_stat_live(ngx_http_request_t *r, ngx_chain_t ***lll,
             nclients = 0;
             //codec = NULL;
             for (ctx = stream->ctx; ctx; ctx = ctx->next, ++nclients) {
-                //rr = ctx->r;
+                rr = ctx->r;
                 if (slcf->stat & NGX_HTTP_LIVE_STAT_CLIENTS) {
                     NGX_HTTP_LIVE_STAT_L("<client>");
                     
-                    //ngx_rtmp_stat_client(r, lll, s);
+                    ngx_http_live_stat_client(rr, lll);
                     
                     /*NGX_RTMP_STAT_L("<dropped>");
                     NGX_RTMP_STAT(buf, ngx_snprintf(buf, sizeof(buf),

@@ -136,6 +136,7 @@ ngx_rtmp_hflv_create_request(ngx_rtmp_session_t *s, u_char *vhost, u_char *path)
     }
     
     // as a virtual request, we only assign required parameters
+    ngx_str_set(&c->addr_text, "local");
     r->connection = c;
     c->pool = s->connection->pool;
     c->log = s->connection->log;
