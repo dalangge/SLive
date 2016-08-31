@@ -155,9 +155,9 @@ ngx_http_live_send_message(ngx_http_request_t *r, ngx_chain_t *out,
                    "http_live: send nmsg=%ui, priority=%ui #%ui",
                    nmsg, priority, ctx->out_last);
        
-    if (priority && ctx->out_buffer && nmsg < ctx->out_cork) {
-        return NGX_OK;
-    }
+    //if (priority && ctx->out_buffer && nmsg < ctx->out_cork) {
+    //    return NGX_OK;
+    //}
     
     if (!r->connection->write->active) {
         ngx_http_live_send(r->connection->write);

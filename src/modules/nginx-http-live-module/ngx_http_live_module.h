@@ -44,7 +44,6 @@ struct ngx_http_live_ctx_s {
     
     size_t                              gop_pos, gop_last;
     size_t                              gop_queue;
-    size_t                              gop_size;
     ngx_chain_t                       **gop;
     
     // for subscriber
@@ -56,8 +55,6 @@ struct ngx_http_live_ctx_s {
     
     /* circular buffer of HTTP message pointers */
     ngx_msec_t                          timeout;
-    unsigned                            out_buffer:1;
-    size_t                              out_cork;
     ngx_chain_t                        *out_chain;
     u_char                             *out_bpos;
     size_t                              out_pos, out_last;
@@ -80,10 +77,8 @@ struct ngx_http_live_loc_conf_s {
     ngx_flag_t                          idle_streams;
     ngx_pool_t                         *pool;
     ngx_http_live_stream_t             *free_streams;
-    size_t                              out_cork;
     size_t                              out_queue;
     size_t                              gop_queue;
-    size_t                              gop_size;
 };
 
 struct ngx_http_live_srv_conf_s {

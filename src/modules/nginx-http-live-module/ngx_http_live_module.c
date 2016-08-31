@@ -20,18 +20,46 @@ static char * ngx_http_live(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static ngx_command_t ngx_http_live_commands[] = {
     
     { ngx_string("live"),
-        NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
+        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_http_live,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_live_loc_conf_t, live),
         NULL },
     
-    /*{ ngx_string("stream_buckets"),
+    { ngx_string("chunk_size"),
         NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_str_slot,
+        ngx_conf_set_num_slot,
+        NGX_HTTP_SRV_CONF_OFFSET,
+        offsetof(ngx_http_live_srv_conf_t, chunk_size),
+        NULL },
+    
+    { ngx_string("stream_buckets"),
+        NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_num_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_live_loc_conf_t, nbuckets),
-        NULL },*/
+        NULL },
+    
+    { ngx_string("idle_streams"),
+        NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_live_loc_conf_t, idle_streams),
+        NULL },
+    
+    { ngx_string("out_queue"),
+        NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_num_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_live_loc_conf_t, out_queue),
+        NULL },
+    
+    { ngx_string("gop_queue"),
+        NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_num_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_live_loc_conf_t, gop_queue),
+        NULL },
     
     ngx_null_command
 };
@@ -114,9 +142,7 @@ ngx_http_live_create_loc_conf(ngx_conf_t* cf)
     conf->nbuckets = NGX_CONF_UNSET;
     conf->idle_streams = NGX_CONF_UNSET;
     conf->out_queue = NGX_CONF_UNSET;
-    conf->out_cork = NGX_CONF_UNSET;
     conf->gop_queue = NGX_CONF_UNSET;
-    conf->gop_size = NGX_CONF_UNSET;
     
     return conf;
 }
@@ -130,10 +156,8 @@ ngx_http_live_merge_loc_conf(ngx_conf_t* cf, void* parent, void* child)
     ngx_conf_merge_value(conf->live, prev->live, 0);
     ngx_conf_merge_value(conf->nbuckets, prev->nbuckets, 1024);
     ngx_conf_merge_value(conf->idle_streams, prev->idle_streams, 1);
-    ngx_conf_merge_size_value(conf->out_queue, prev->out_queue, 256);
-    ngx_conf_merge_size_value(conf->out_cork, prev->out_cork, conf->out_queue / 8);
-    ngx_conf_merge_size_value(conf->gop_queue, prev->gop_queue, 256);
-    ngx_conf_merge_size_value(conf->gop_size, prev->gop_size, 1);
+    ngx_conf_merge_size_value(conf->out_queue, prev->out_queue, 512);
+    ngx_conf_merge_size_value(conf->gop_queue, prev->gop_queue, 0);
     
     conf->pool = ngx_create_pool(4096, &cf->cycle->new_log);
     if (conf->pool == NULL) {
@@ -213,13 +237,10 @@ ngx_http_live_join(ngx_http_request_t *r, u_char *name, unsigned publisher)
     
     ctx->r = r;
     ctx->out_queue = llcf->out_queue;
-    ctx->out_cork = llcf->out_cork;
-    ctx->out_buffer = 1;
     ctx->timeout = 30000;
     
     ctx->gop_queue = llcf->gop_queue;
-    ctx->gop_size = llcf->gop_size;
-    if (publisher && llcf->gop_size) {
+    if (publisher && llcf->gop_queue) {
         ctx->gop = ngx_palloc(r->connection->pool, sizeof(ngx_chain_t *) * llcf->gop_queue);
     }
     
@@ -269,7 +290,6 @@ ngx_http_live_av(ngx_http_request_t *r, ngx_chain_t *in, ngx_int_t type, ngx_int
     ngx_chain_t                    *rpkt;
     ngx_uint_t                      nmsg;
     size_t                          pos;
-    
     
     lscf = ngx_http_get_module_srv_conf(r, ngx_http_live_module);
     if (lscf == NULL) {
@@ -322,8 +342,7 @@ ngx_http_live_av(ngx_http_request_t *r, ngx_chain_t *in, ngx_int_t type, ngx_int
     if ((type == LIVE_AUDIO || type == LIVE_VIDEO) && ctx->gop_queue >= 2) {
         nmsg = (ctx->gop_queue + ctx->gop_last - ctx->gop_pos) % ctx->gop_queue + 1;
         if (nmsg >= ctx->gop_queue) {
-            ngx_http_live_free_shared_chain(lscf, ctx->gop[ctx->gop_pos]);
-            ++ctx->gop_pos;
+            ngx_http_live_free_shared_chain(lscf, ctx->gop[ctx->gop_pos++]);
             ctx->gop_pos %= ctx->gop_queue;
         }
         
@@ -377,20 +396,20 @@ ngx_http_live_av(ngx_http_request_t *r, ngx_chain_t *in, ngx_int_t type, ngx_int
             pctx->avc_header_sent = 1;
             continue;
         }
-        
+
         if (!pctx->gop_sent) {
             pos = ctx->gop_pos;
             while (pos != ctx->gop_last) {
-                
                 if (ngx_http_live_key_frame(ctx->gop[pos])) {
                     while (pos != ctx->gop_last) {
                         ngx_http_live_send_message(pctx->r, ctx->gop[pos++], 0);
+                        pos %= ctx->gop_queue;
                     }
                     break;
                 }
                 pos++;
+                pos %= ctx->gop_queue;
             }
-            
             pctx->gop_sent = 1;
             continue;
         }
